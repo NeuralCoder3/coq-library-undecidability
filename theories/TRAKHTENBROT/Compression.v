@@ -1,56 +1,67 @@
 (** ** Signature Compression *)
 
-Require Import Equations.Equations Fin.
-From Undecidability.FOLP Require Export FullTarski.
+
+Require Import List Arith Bool Lia Eqdep_dec.
+
+From Undecidability.Shared.Libs.DLW.Utils
+  Require Import utils_tac utils_list utils_nat finite.
+
+From Undecidability.Shared.Libs.DLW.Vec 
+  Require Import pos vec.
+
+From Undecidability.Shared.Libs.DLW.Wf 
+  Require Import wf_finite.
+
+From Undecidability.TRAKHTENBROT
+  Require Import notations fol_ops fo_terms fo_logic fo_sat membership.
+
+From Undecidability.FOL
+  Require Import DecidableEnumerable.
+
+Set Implicit Arguments.
 
 
 
 (* Prelim (to be moved) *)
 
-Lemma cast_refl X n (v : vector X n) :
+Definition cast X n k (v : vec X n) (H : n = k) : vec X k.
+Proof.
+  subst. exact v.
+Defined.
+
+Lemma cast_refl X n (v : vec X n) :
   cast v eq_refl = v.
 Proof.
-  induction v; cbn; congruence.
+  induction v; cbn; try congruence.
 Qed.
 
-Lemma to_list_in X {HX : eq_dec X} n (v : vector X n) x :
-  x el to_list v -> vec_in x v.
+Lemma to_list_in X n (v : vec X n) x :
+  x el vec_list v -> in_vec x v.
 Proof.
   induction v; cbn; try tauto.
-  intros H. decide (h = x) as [<-|Hx]; constructor.
-  apply IHv. tauto.
 Qed.
 
-Lemma to_list_in' X n (v : vector X n) x :
-  vec_in x v -> x el to_list v.
+Lemma to_list_in' X n (v : vec X n) x :
+  in_vec x v -> x el vec_list v.
 Proof.
-  induction 1; cbn; tauto.
+  induction v; cbn; tauto.
 Qed.
 
-Lemma vec_map_in X Y (f : X -> Y) n (v : vector X n) y :
-  vec_in y (Vector.map f v) -> { x & prod (vec_in x v) (y = f x) }.
+Lemma vec_map_in X Y (f : X -> Y) n (v : vec X n) y :
+  in_vec y (vec_map f v) -> exists x, in_vec x v /\ y = f x.
 Proof.
-  induction v; cbn.
-  - inversion 1.
-  - inversion 1; subst.
-    + exists h. split; trivial.
-    + apply Eqdep.EqdepTheory.inj_pair2 in H2 as ->.
-      apply IHv in X1 as [x[H1 ->]].
-      exists x. split; trivial. now constructor.
+  induction v; cbn; try tauto.
+  - intros [<-|H].
+    + exists x. tauto.
+    + apply IHv in H as [z[H ->]]. exists z. tauto.
 Qed.
 
-Lemma vec_map_in' X Y (f : X -> Y) n (v : vector X n) x :
-  vec_in x v -> vec_in (f x) (Vector.map f v).
+Lemma vec_map_in' X Y (f : X -> Y) n (v : vec X n) x :
+  in_vec x v -> in_vec (f x) (vec_map f v).
 Proof.
-  induction v; cbn.
-  - inversion 1.
-  - inversion 1; subst; constructor.
-    apply Eqdep.EqdepTheory.inj_pair2 in H2 as ->.
-    now apply IHv.
+  induction v; cbn; trivial.
+  intros [->|H]; auto.
 Qed.
-
-(* Memo: instantiate to discrete base types *)
-Print Assumptions vec_map_in'.
 
 Lemma forall_proper X (p q : X -> Prop) :
   (forall x, p x <-> q x) -> (forall x, p x) <-> (forall x, q x).
@@ -68,8 +79,32 @@ Qed.
 
 (* Satisfiability (not yet classical) *)
 
-Definition SAT Sigma (phi : @form Sigma) :=
-  exists D (I : @interp Sigma D) rho, rho ⊨ phi.
+Definition SAT Sigma (phi : fol_form Sigma) :=
+  exists D (I : fo_model Sigma D) rho, fol_sem I rho phi.
+
+
+
+(* Preamble that eases porting from the other syntax *)
+
+Existing Class fo_signature.
+Arguments syms {_}.
+Arguments rels {_}.
+Arguments ar_syms {_} _.
+Arguments ar_rels {_} _.
+
+Definition term {Sigma : fo_signature} :=
+  fo_term nat ar_syms.
+
+Definition Func {Sigma : fo_signature} :=
+  @in_fot nat _ ar_syms.
+
+Definition form {Sigma : fo_signature} :=
+  fol_form Sigma.
+
+Existing Class fo_model.
+
+Definition eval {Sigma} {D} {I : fo_model Sigma D} :=
+  @fo_term_sem _ _ nat D (fom_syms I).
 
 
 
@@ -77,45 +112,42 @@ Definition SAT Sigma (phi : @form Sigma) :=
 
 Section Compression.
 
-  Context { Sigma : Signature }.
+  Context { Sigma : fo_signature }.
 
   (* Input: signature only containing relations of a fixed arity *)
 
   Variable arity : nat.
-  Hypothesis arity_const : forall P, pred_ar P = arity.
-  Hypothesis funcs_empty : Funcs -> False.
+  Hypothesis arity_const : forall P, ar_rels P = arity.
+  Hypothesis funcs_empty : syms -> False.
 
   (* Output: signature with constants for each relation and a single relation *)
 
   Definition compress_sig :=
-    {| Funcs := Preds;
-       fun_ar := fun _ => 0;
-       Preds := unit;
-       pred_ar := fun _ => S arity |}.
+    {| syms := rels;
+       ar_syms := fun _ => 0;
+       rels := unit;
+       ar_rels := fun _ => S arity |}.
 
   (* Conversion: each atom P_i(x, y, ...) is replaced by P (i, x, y, ...) *)
 
-  Fixpoint convert_t (t : @term Sigma) : @term compress_sig :=
+  Fixpoint convert_t (t : term) : @term compress_sig :=
     match t with
-    | var_term s => var_term s
-    | Func f v => False_rect _ (funcs_empty f)
+    | in_var s => in_var s
+    | in_fot f v => False_rect _ (funcs_empty f)
     end.
 
-  Definition convert_v n (v : vector term n) :=
-    Vector.map convert_t v.
+  Definition convert_v n (v : vec term n) :=
+    vec_map convert_t v.
   
-  Definition encode_v P (v : vector term (pred_ar P)) :=
-    Vector.cons (@Func compress_sig P Vector.nil) (cast (convert_v v) (arity_const P)).
+  Definition encode_v P (v : vec term (ar_rels P)) :=
+    vec_cons (@Func compress_sig P vec_nil) (cast (convert_v v) (arity_const P)).
 
   Fixpoint encode (phi : @form Sigma) : @form compress_sig :=
     match phi with
-    | Pred P v => @Pred compress_sig tt (encode_v v)
-    | Fal => Fal
-    | Impl phi psi => Impl (encode phi) (encode psi)
-    | Conj phi psi => Conj (encode phi) (encode psi)
-    | Disj phi psi => Disj (encode phi) (encode psi)
-    | Ex phi => Ex (encode phi)
-    | All phi => All (encode phi)
+    | fol_atom _ P v => @fol_atom compress_sig tt (encode_v v)
+    | fol_false _ => fol_false _
+    | fol_bin bin phi psi => fol_bin bin (encode phi) (encode psi)
+    | fol_quant quant phi => fol_quant quant (encode phi)
     end.
 
   (* Direction 1: sat phi -> sat (encode phi) *)
@@ -123,34 +155,34 @@ Section Compression.
   Section to_compr.
 
     Context { D : Type }.
-    Context { I : @interp Sigma D }.
+    Context { I : @fo_model Sigma D }.
     Variable d0 : D.
 
-    Fixpoint vec_fill n (v : vector (D + Preds) n) : vector D n :=
+    Fixpoint vec_fill n (v : vec (D + rels) n) : vec D n :=
       match v with
-      | Vector.nil => Vector.nil
-      | Vector.cons (inl x) v => Vector.cons x (vec_fill v)
-      | Vector.cons (inr P) v => Vector.cons d0 (vec_fill v)
+      | vec_nil => vec_nil
+      | vec_cons (inl x) v => vec_cons x (vec_fill v)
+      | vec_cons (inr P) v => vec_cons d0 (vec_fill v)
       end.
 
-    Lemma vec_fill_inl n (v : vector D n) :
-      vec_fill (Vector.map inl v) = v.
+    Lemma vec_fill_inl n (v : vec D n) :
+      vec_fill (vec_map inl v) = v.
     Proof.
       induction v; cbn; congruence.
     Qed.
 
     Local Instance compr_interp :
-      @interp compress_sig (D + Preds).
+      @fo_model compress_sig (D + rels).
     Proof.
       split.
       - intros P v. right. exact P.
       - intros [] v; cbn in *.
-        destruct (Vector.hd v) as [d|P].
+        destruct (vec_head v) as [d|P].
         + exact True.
-        + exact (@i_P _ _ I P (cast (vec_fill (Vector.tl v)) (eq_sym (arity_const P)))).
+        + exact (@fom_rels _ _ I P (cast (vec_fill (vec_tail v)) (eq_sym (arity_const P)))).
     Defined.
 
-    Definition convert_env (rho : nat -> D) : nat -> D + Preds :=
+    Definition convert_env (rho : nat -> D) : nat -> D + rels :=
       fun n => inl (rho n).
 
     Lemma eval_to_compr (rho : nat -> D) t :
@@ -160,7 +192,7 @@ Section Compression.
       exfalso. apply (funcs_empty f).
     Qed.
 
-    Definition env_fill (rho : nat -> D + Preds) : nat -> D + Preds :=
+    Definition env_fill (rho : nat -> D + rels) : nat -> D + rels :=
       fun n => match (rho n) with inl d => inl d | inr P => inl d0 end.
 
     Lemma env_fill_sat_help rho phi x :
