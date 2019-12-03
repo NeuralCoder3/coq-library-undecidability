@@ -106,6 +106,11 @@ Existing Class fo_model.
 Definition eval {Sigma} {D} {I : fo_model Sigma D} :=
   @fo_term_sem _ _ nat D (fom_syms I).
 
+Definition sat {Sigma} {D} {I : fo_model Sigma D} :=
+  @fol_sem Sigma D I.
+
+Notation "x .: rho" := (env_lift rho x) (at level 30).
+
 
 
 (* STEP 1: compression into a single relation symbol *)
@@ -196,18 +201,18 @@ Section Compression.
       fun n => match (rho n) with inl d => inl d | inr P => inl d0 end.
 
     Lemma env_fill_sat_help rho phi x :
-      env_fill (x .: env_fill rho) ⊨ encode phi <-> env_fill (x .: rho) ⊨ encode phi.
+      sat (env_fill (x .: env_fill rho)) (encode phi) <-> sat (env_fill (x .: rho)) (encode phi).
     Proof.
-      apply sat_ext. intros []; try reflexivity. unfold env_fill; cbn. now destruct (rho n).
+      apply fol_sem_ext. intros [] _; try reflexivity. unfold env_fill; cbn. now destruct (rho n).
     Qed.
 
     Lemma env_fill_sat rho phi :
       sat (env_fill rho) (encode phi) <-> sat rho (encode phi).
     Proof.
-      induction phi in rho |- *. 1, 3, 4, 5: firstorder.
-      - cbn. rewrite <- (arity_const P), !cast_refl.
-        replace (vec_fill (Vector.map (eval (env_fill rho)) (convert_v t)))
-                with (vec_fill (Vector.map (eval rho) (convert_v t))); try reflexivity.
+      induction phi in rho |- *; try tauto. 
+      - cbn. rewrite <- (arity_const p), !cast_refl.
+        replace (vec_fill (vec_map (eval (env_fill rho)) (convert_v v)))
+                with (vec_fill (vec_map (eval rho) (convert_v v))); try reflexivity.
         induction t; cbn; trivial. rewrite IHt. destruct h as [x | f v]; cbn. 
         + unfold env_fill. now destruct rho.
         + exfalso. apply (funcs_empty f).
