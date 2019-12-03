@@ -21,58 +21,57 @@ From Undecidability.FOL
 Set Implicit Arguments.
 
 
-
 (* Prelim (to be moved) *)
 
-Definition cast X n k (v : vec X n) (H : n = k) : vec X k.
-Proof.
-  subst. exact v.
-Defined.
+Definition cast X n k (v : vec X n) (H : n = k) : vec X k := eq_rect _ (vec X) v _ H.
 
 Lemma cast_refl X n (v : vec X n) :
   cast v eq_refl = v.
-Proof.
-  induction v; cbn; try congruence.
-Qed.
+Proof. reflexivity. Qed.
+
+(** DLW I rewrote the proofs here because of the results 
+    where already in there somewhere *)
 
 Lemma to_list_in X n (v : vec X n) x :
   x el vec_list v -> in_vec x v.
 Proof.
-  induction v; cbn; try tauto.
+  apply in_vec_list.
 Qed.
 
 Lemma to_list_in' X n (v : vec X n) x :
   in_vec x v -> x el vec_list v.
 Proof.
-  induction v; cbn; tauto.
+  apply in_vec_list.
 Qed.
+
+Local Hint Resolve in_vec_pos.
 
 Lemma vec_map_in X Y (f : X -> Y) n (v : vec X n) y :
   in_vec y (vec_map f v) -> exists x, in_vec x v /\ y = f x.
 Proof.
-  induction v; cbn; try tauto.
-  - intros [<-|H].
-    + exists x. tauto.
-    + apply IHv in H as [z[H ->]]. exists z. tauto.
+  intros H.
+  apply in_vec_list, vec_list_inv in H.
+  destruct H as (p & ->).
+  exists (vec_pos v p); rew vec; auto.
 Qed.
 
 Lemma vec_map_in' X Y (f : X -> Y) n (v : vec X n) x :
   in_vec x v -> in_vec (f x) (vec_map f v).
 Proof.
-  induction v; cbn; trivial.
-  intros [->|H]; auto.
+  rewrite in_vec_list, in_vec_list, vec_list_vec_map.
+  apply in_map.
 Qed.
 
 Lemma forall_proper X (p q : X -> Prop) :
   (forall x, p x <-> q x) -> (forall x, p x) <-> (forall x, q x).
 Proof.
-  firstorder.
+  apply forall_equiv.
 Qed.
 
 Lemma exists_proper X (p q : X -> Prop) :
   (forall x, p x <-> q x) -> (exists x, p x) <-> (exists x, q x).
 Proof.
-  firstorder.
+  apply exists_equiv.
 Qed.
 
 
@@ -111,8 +110,6 @@ Definition sat {Sigma} {D} {I : fo_model Sigma D} :=
 
 Notation "x .: rho" := (env_lift rho x) (at level 30).
 
-
-
 (* STEP 1: compression into a single relation symbol *)
 
 Section Compression.
@@ -127,11 +124,15 @@ Section Compression.
 
   (* Output: signature with constants for each relation and a single relation *)
 
+  Print rels.
+
   Definition compress_sig :=
-    {| syms := rels;
+    {| syms := rels;                  (* DLW not empty here ?? *)
        ar_syms := fun _ => 0;
        rels := unit;
        ar_rels := fun _ => S arity |}.
+
+  Print compress_sig.
 
   (* Conversion: each atom P_i(x, y, ...) is replaced by P (i, x, y, ...) *)
 
@@ -163,17 +164,25 @@ Section Compression.
     Context { I : @fo_model Sigma D }.
     Variable d0 : D.
 
+(*
     Fixpoint vec_fill n (v : vec (D + rels) n) : vec D n :=
       match v with
       | vec_nil => vec_nil
       | vec_cons (inl x) v => vec_cons x (vec_fill v)
       | vec_cons (inr P) v => vec_cons d0 (vec_fill v)
       end.
+*)
+
+    Let fD (x : D + rels) : D := match x with inl x => x | inr _ => d0 end.
+
+    Definition vec_fill n (v : vec (D + rels) n) := vec_map fD v.
 
     Lemma vec_fill_inl n (v : vec D n) :
       vec_fill (vec_map inl v) = v.
     Proof.
-      induction v; cbn; congruence.
+      unfold vec_fill.
+      rewrite vec_map_map.
+      apply vec_pos_ext; intro; rew vec.
     Qed.
 
     Local Instance compr_interp :
@@ -197,13 +206,12 @@ Section Compression.
       exfalso. apply (funcs_empty f).
     Qed.
 
-    Definition env_fill (rho : nat -> D + rels) : nat -> D + rels :=
-      fun n => match (rho n) with inl d => inl d | inr P => inl d0 end.
+    Definition env_fill (rho : nat -> D + rels) n : D + rels := inl (fD (rho n)).
 
     Lemma env_fill_sat_help rho phi x :
       sat (env_fill (x .: env_fill rho)) (encode phi) <-> sat (env_fill (x .: rho)) (encode phi).
     Proof.
-      apply fol_sem_ext. intros [] _; try reflexivity. unfold env_fill; cbn. now destruct (rho n).
+      apply fol_sem_ext. intros [] _; try reflexivity.
     Qed.
 
     Lemma env_fill_sat rho phi :
@@ -211,17 +219,17 @@ Section Compression.
     Proof.
       induction phi in rho |- *; try tauto. 
       - cbn. rewrite <- (arity_const p), !cast_refl.
-        replace (vec_fill (vec_map (eval (env_fill rho)) (convert_v v)))
-                with (vec_fill (vec_map (eval rho) (convert_v v))); try reflexivity.
-        induction t; cbn; trivial. rewrite IHt. destruct h as [x | f v]; cbn. 
-        + unfold env_fill. now destruct rho.
-        + exfalso. apply (funcs_empty f).
-      - cbn. apply forall_proper. intros x.
-        rewrite <- IHphi, env_fill_sat_help.
-        now setoid_rewrite <- IHphi at 2.
-      - cbn. apply exists_proper. intros x.
-        rewrite <- IHphi, env_fill_sat_help.
-        now setoid_rewrite <- IHphi at 2.
+        do 2 rewrite vec_map_map.
+        apply fol_equiv_ext; f_equal.
+        apply vec_pos_ext; intros q; rew vec.
+        match goal with
+          |- fD (_ ?t) = fD (_ ?t) => generalize t 
+        end; clear q.
+        intros []; simpl; auto.
+      - apply fol_bin_sem_ext; auto. 
+      - simpl; apply fol_quant_sem_ext; intro; auto.
+        rewrite  <- IHphi, env_fill_sat_help.
+        apply IHphi.
     Qed.
 
     Lemma sat_to_compr (rho : nat -> D) phi :
