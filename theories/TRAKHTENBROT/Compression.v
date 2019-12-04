@@ -3,6 +3,8 @@
 
 Require Import List Arith Bool Lia Eqdep_dec.
 
+From Equations Require Import Equations.
+
 From Undecidability.Shared.Libs.DLW.Utils
   Require Import utils_tac utils_list utils_nat finite.
 
@@ -108,8 +110,15 @@ Definition term {Sigma : fo_signature} :=
 Definition Func {Sigma : fo_signature} :=
   @in_fot nat _ ar_syms.
 
+Arguments Func {_} _.
+
 Definition form {Sigma : fo_signature} :=
   fol_form Sigma.
+
+Definition Pred {Sigma : fo_signature} :=
+  @fol_atom Sigma.
+
+Arguments Pred {_} _.
 
 Existing Class fo_model.
 
@@ -311,32 +320,36 @@ End Compression.
 
 Section Constants.
 
-  Context { Sigma : Signature } {HdF : eq_dec Funcs}.
+  Context { Sigma : fo_signature } {HdF : eq_dec syms}.
 
   (* Simulation of a single constant *)
 
   Section Rpl.
 
-    Context { D : Type } { I : @interp Sigma D }.
-    Variable c : Funcs.
-    Hypothesis Hc : 0 = fun_ar c.
+    Context { D : Type } { I : @fo_model Sigma D }.
+    Variable c : syms.
+    Hypothesis Hc : 0 = ar_syms c.
 
     Fixpoint rpl_const_t n t :=
       match t with 
-      | var_term x => var_term x
-      | Func f v => if Dec (f = c) then var_term n else Func f (Vector.map (rpl_const_t n) v)
+      | in_var x => in_var x
+      | in_fot f v => if Dec (f = c) then in_var n else Func f (vec_map (rpl_const_t n) v)
       end.
 
     Definition update (rho : nat -> D) n d : nat -> D :=
       fun k => if Dec (k = n) then d else rho k.
 
     Definition i_const rho : D :=
-      eval rho (@Func _ c (match Hc with eq_refl => Vector.nil end)).
+      eval rho (Func c (match Hc with eq_refl => vec_nil end)).
+
+    Ltac simp_term := unfold eval, Func, fo_term_sem; cbn -[fo_term_recursion];
+                      try rewrite !fo_term_recursion_fix_1.
 
     Lemma i_const_inv rho rho' :
       i_const rho = i_const rho'.
     Proof.
-      cbn. erewrite vec_map_ext; try reflexivity.
+      unfold i_const. simp_term.
+      erewrite vec_map_ext; try reflexivity.
       intros t. destruct Hc. inversion 1.
     Qed.
 
@@ -346,14 +359,26 @@ Section Constants.
       cbn. f_equal. destruct Hc. now depelim v.
     Qed.
 
+    Opaque i_const.
+
+    Inductive unused_term (n : nat) : term -> Prop :=
+    | uft_var m : n <> m -> unused_term n (in_var m)
+    | uft_Func F v : (forall t, in_vec t v -> unused_term n t) -> unused_term n (Func F v).
+
+    Inductive unused (n : nat) : form -> Prop :=
+    | uf_Fal : unused n (fol_false _)
+    | uf_Pred P v : (forall t, in_vec t v -> unused_term n t) -> unused n (Pred P v)
+    | uf_bop bop phi psi : unused n phi -> unused n psi -> unused n (fol_bin bop phi psi)
+    | uf_quant quant phi : unused n phi -> unused n (fol_quant quant phi).
+
     Lemma rpl_const_eval t n rho :
       unused_term n t -> eval (update rho n (i_const rho)) (rpl_const_t n t) = eval rho t.
     Proof.
-      induction 1; cbn -[i_const].
-      - unfold update. decide _; congruence.
-      - decide _; cbn -[i_const].
-        + subst. unfold update. decide (n = n); try tauto. apply i_const_eq. 
-        + f_equal. erewrite vec_comp. apply vec_map_ext, H0. reflexivity.
+      induction 1.
+      - cbn. unfold update. decide _; congruence.
+      - simp_term. unfold update. decide _; simp_term.
+        + cbn. subst. unfold update. decide (n = n); try tauto. cbn. try apply i_const_eq. admit.
+        + simp_term. f_equal. apply vec_erewrite vec_comp. apply vec_map_ext, H0. reflexivity.
     Qed.
 
     Fixpoint rpl_const n phi :=
