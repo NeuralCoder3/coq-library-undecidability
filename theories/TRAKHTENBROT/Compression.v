@@ -18,8 +18,6 @@ From Undecidability.TRAKHTENBROT
 From Undecidability.FOL
   Require Import DecidableEnumerable.
 
-Set Implicit Arguments.
-
 
 
 (* Prelim (to be moved) *)
@@ -63,6 +61,12 @@ Proof.
   intros [->|H]; auto.
 Qed.
 
+Lemma vec_comp X Y Z (f : X -> Y) (g : Y -> Z) (h : X -> Z) n (v : vec X n) :
+  (forall x, h x = g (f x)) -> vec_map g (vec_map f v) = vec_map h v.
+Proof.
+  intros H. induction v; cbn; congruence.
+Qed.
+
 Lemma forall_proper X (p q : X -> Prop) :
   (forall x, p x <-> q x) -> (forall x, p x) <-> (forall x, q x).
 Proof.
@@ -73,6 +77,12 @@ Lemma exists_proper X (p q : X -> Prop) :
   (forall x, p x <-> q x) -> (exists x, p x) <-> (exists x, q x).
 Proof.
   firstorder.
+Qed.
+
+Lemma eq_iff X Y :
+  X = Y -> X <-> Y.
+Proof.
+  now intros ->.
 Qed.
 
 
@@ -176,7 +186,7 @@ Section Compression.
       induction v; cbn; congruence.
     Qed.
 
-    Local Instance compr_interp :
+    Instance compr_interp :
       @fo_model compress_sig (D + rels).
     Proof.
       split.
@@ -209,17 +219,17 @@ Section Compression.
     Lemma env_fill_sat rho phi :
       sat (env_fill rho) (encode phi) <-> sat rho (encode phi).
     Proof.
-      induction phi in rho |- *; try tauto. 
+      induction phi in rho |- *; try destruct f; try firstorder tauto.
       - cbn. rewrite <- (arity_const p), !cast_refl.
-        replace (vec_fill (vec_map (eval (env_fill rho)) (convert_v v)))
-                with (vec_fill (vec_map (eval rho) (convert_v v))); try reflexivity.
-        induction t; cbn; trivial. rewrite IHt. destruct h as [x | f v]; cbn. 
+        apply eq_iff. f_equal.
+        induction v; cbn; trivial. unfold convert_v in IHv.
+        rewrite IHv. destruct x as [x | f v']; cbn. 
         + unfold env_fill. now destruct rho.
         + exfalso. apply (funcs_empty f).
-      - cbn. apply forall_proper. intros x.
+      - cbn. apply exists_proper. intros x.
         rewrite <- IHphi, env_fill_sat_help.
         now setoid_rewrite <- IHphi at 2.
-      - cbn. apply exists_proper. intros x.
+      - cbn. apply forall_proper. intros x.
         rewrite <- IHphi, env_fill_sat_help.
         now setoid_rewrite <- IHphi at 2.
     Qed.
@@ -227,23 +237,23 @@ Section Compression.
     Lemma sat_to_compr (rho : nat -> D) phi :
       sat rho phi <-> sat (convert_env rho) (encode phi).
     Proof.
-      induction phi in rho |- *; cbn; try firstorder tauto.
-      - rewrite <- (arity_const P), !cast_refl.
+      induction phi in rho |- *; cbn; try destruct f; try firstorder tauto.
+      - rewrite <- (arity_const p), !cast_refl.
         unfold convert_v. erewrite vec_comp; try reflexivity.
-        rewrite <- (vec_fill_inl (Vector.map (eval rho) t)).
-        erewrite vec_comp; try reflexivity. apply eval_to_compr.
+        rewrite <- vec_fill_inl at 1. erewrite vec_comp; try reflexivity.
+        cbn. intros x. symmetry. apply eval_to_compr.
+      - split; intros [d H].
+        + exists (inl d). apply IHphi in H. eapply fol_sem_ext, H. now intros [].
+        + destruct d as [d|P].
+          * exists d. apply IHphi. eapply fol_sem_ext; try apply H. now intros [].
+          * exists d0. apply IHphi. apply env_fill_sat in H.
+            eapply fol_sem_ext; try apply H. now intros [].
       - split; intros H d.
         + destruct d as [d|P].
-          * eapply sat_ext; try apply IHphi, (H d). now intros [].
+          * eapply fol_sem_ext; try apply IHphi, (H d). now intros [].
           * specialize (H d0). apply IHphi in H. apply env_fill_sat.
-            eapply sat_ext; try apply H. now intros [].
-        + apply IHphi. eapply sat_ext; try apply (H (inl d)). now intros [].
-      - split; intros [d H].
-        + exists (inl d). apply IHphi in H. eapply sat_ext, H. now intros [].
-        + destruct d as [d|P].
-          * exists d. apply IHphi. eapply sat_ext; try apply H. now intros [].
-          * exists d0. apply IHphi. apply env_fill_sat in H.
-            eapply sat_ext; try apply H. now intros [].
+            eapply fol_sem_ext; try apply H. now intros [].
+        + apply IHphi. eapply fol_sem_ext; try apply (H (inl d)). now intros [].
     Qed.
 
   End to_compr.
@@ -253,16 +263,16 @@ Section Compression.
   Section from_compr.
 
     Context { D : Type }.
-    Context { I : @interp compress_sig D }.
+    Context { I : @fo_model compress_sig D }.
 
-    Notation index P := (@i_f _ _ I P Vector.nil).
+    Notation index P := (@fom_syms _ _ I P vec_nil).
 
-    Local Instance uncompr_interp :
-      @interp Sigma D.
+    Instance uncompr_interp :
+      @fo_model Sigma D.
     Proof.
       split.
       - intros f v. exfalso. apply (funcs_empty f).
-      - intros P v. exact (@i_P _ _ I tt (Vector.cons (index P) (cast v (arity_const P)))).
+      - intros P v. exact (@fom_rels _ _ I tt (vec_cons (index P) (cast v (arity_const P)))).
     Defined.
 
     Lemma eval_from_compr (rho : nat -> D) (t : @term Sigma) :
@@ -275,11 +285,10 @@ Section Compression.
     Lemma sat_from_compr (rho : nat -> D) phi :
       sat rho phi <-> sat rho (encode phi).
     Proof.
-      induction phi in rho |- *; cbn; try firstorder tauto.
-      replace (cast (Vector.map (eval rho) t) (arity_const P))
-        with (Vector.map (eval rho) (cast (convert_v t) (arity_const P))); try reflexivity.
-      rewrite <- (arity_const P) in *. rewrite !cast_refl.
-      apply vec_comp. intros t'. now rewrite eval_from_compr.
+      induction phi in rho |- *; cbn; try destruct f; try firstorder tauto.
+      apply eq_iff. f_equal. f_equal.
+      rewrite <- (arity_const p). rewrite !cast_refl.
+      symmetry. apply vec_comp. intros t'. apply eval_from_compr.
     Qed.
 
   End from_compr.
