@@ -3,6 +3,8 @@
 
 Require Import List Arith Bool Lia Eqdep_dec.
 
+From Equations Require Import Equations.
+
 From Undecidability.Shared.Libs.DLW.Utils
   Require Import utils_tac utils_list utils_nat finite.
 
@@ -17,8 +19,6 @@ From Undecidability.TRAKHTENBROT
 
 From Undecidability.FOL
   Require Import DecidableEnumerable.
-
-Set Implicit Arguments.
 
 
 (* Prelim (to be moved) *)
@@ -62,6 +62,12 @@ Proof.
   apply in_map.
 Qed.
 
+Lemma vec_comp X Y Z (f : X -> Y) (g : Y -> Z) (h : X -> Z) n (v : vec X n) :
+  (forall x, h x = g (f x)) -> vec_map g (vec_map f v) = vec_map h v.
+Proof.
+  intros H. induction v; cbn; congruence.
+Qed.
+
 Lemma forall_proper X (p q : X -> Prop) :
   (forall x, p x <-> q x) -> (forall x, p x) <-> (forall x, q x).
 Proof.
@@ -72,6 +78,12 @@ Lemma exists_proper X (p q : X -> Prop) :
   (forall x, p x <-> q x) -> (exists x, p x) <-> (exists x, q x).
 Proof.
   apply exists_equiv.
+Qed.
+
+Lemma eq_iff X Y :
+  X = Y -> X <-> Y.
+Proof.
+  now intros ->.
 Qed.
 
 
@@ -97,8 +109,15 @@ Definition term {Sigma : fo_signature} :=
 Definition Func {Sigma : fo_signature} :=
   @in_fot nat _ ar_syms.
 
+Arguments Func {_} _.
+
 Definition form {Sigma : fo_signature} :=
   fol_form Sigma.
+
+Definition Pred {Sigma : fo_signature} :=
+  @fol_atom Sigma.
+
+Arguments Pred {_} _.
 
 Existing Class fo_model.
 
@@ -185,7 +204,7 @@ Section Compression.
       apply vec_pos_ext; intro; rew vec.
     Qed.
 
-    Local Instance compr_interp :
+    Instance compr_interp :
       @fo_model compress_sig (D + rels).
     Proof.
       split.
@@ -217,41 +236,41 @@ Section Compression.
     Lemma env_fill_sat rho phi :
       sat (env_fill rho) (encode phi) <-> sat rho (encode phi).
     Proof.
-      induction phi in rho |- *; try tauto. 
+      induction phi in rho |- *; try destruct f; try firstorder tauto.
       - cbn. rewrite <- (arity_const p), !cast_refl.
-        do 2 rewrite vec_map_map.
-        apply fol_equiv_ext; f_equal.
-        apply vec_pos_ext; intros q; rew vec.
-        match goal with
-          |- fD (_ ?t) = fD (_ ?t) => generalize t 
-        end; clear q.
-        intros []; simpl; auto.
-      - apply fol_bin_sem_ext; auto. 
-      - simpl; apply fol_quant_sem_ext; intro; auto.
-        rewrite  <- IHphi, env_fill_sat_help.
-        apply IHphi.
+        apply eq_iff. f_equal.
+        induction v; cbn; trivial. unfold convert_v in IHv.
+        rewrite IHv. destruct x as [x | f v']; cbn. 
+        + unfold env_fill. now destruct rho.
+        + exfalso. apply (funcs_empty f).
+      - cbn. apply exists_proper. intros x.
+        rewrite <- IHphi, env_fill_sat_help.
+        now setoid_rewrite <- IHphi at 2.
+      - cbn. apply forall_proper. intros x.
+        rewrite <- IHphi, env_fill_sat_help.
+        now setoid_rewrite <- IHphi at 2.
     Qed.
 
     Lemma sat_to_compr (rho : nat -> D) phi :
       sat rho phi <-> sat (convert_env rho) (encode phi).
     Proof.
-      induction phi in rho |- *; cbn; try firstorder tauto.
-      - rewrite <- (arity_const P), !cast_refl.
+      induction phi in rho |- *; cbn; try destruct f; try firstorder tauto.
+      - rewrite <- (arity_const p), !cast_refl.
         unfold convert_v. erewrite vec_comp; try reflexivity.
-        rewrite <- (vec_fill_inl (Vector.map (eval rho) t)).
-        erewrite vec_comp; try reflexivity. apply eval_to_compr.
+        rewrite <- vec_fill_inl at 1. erewrite vec_comp; try reflexivity.
+        cbn. intros x. symmetry. apply eval_to_compr.
+      - split; intros [d H].
+        + exists (inl d). apply IHphi in H. eapply fol_sem_ext, H. now intros [].
+        + destruct d as [d|P].
+          * exists d. apply IHphi. eapply fol_sem_ext; try apply H. now intros [].
+          * exists d0. apply IHphi. apply env_fill_sat in H.
+            eapply fol_sem_ext; try apply H. now intros [].
       - split; intros H d.
         + destruct d as [d|P].
-          * eapply sat_ext; try apply IHphi, (H d). now intros [].
+          * eapply fol_sem_ext; try apply IHphi, (H d). now intros [].
           * specialize (H d0). apply IHphi in H. apply env_fill_sat.
-            eapply sat_ext; try apply H. now intros [].
-        + apply IHphi. eapply sat_ext; try apply (H (inl d)). now intros [].
-      - split; intros [d H].
-        + exists (inl d). apply IHphi in H. eapply sat_ext, H. now intros [].
-        + destruct d as [d|P].
-          * exists d. apply IHphi. eapply sat_ext; try apply H. now intros [].
-          * exists d0. apply IHphi. apply env_fill_sat in H.
-            eapply sat_ext; try apply H. now intros [].
+            eapply fol_sem_ext; try apply H. now intros [].
+        + apply IHphi. eapply fol_sem_ext; try apply (H (inl d)). now intros [].
     Qed.
 
   End to_compr.
@@ -261,16 +280,16 @@ Section Compression.
   Section from_compr.
 
     Context { D : Type }.
-    Context { I : @interp compress_sig D }.
+    Context { I : @fo_model compress_sig D }.
 
-    Notation index P := (@i_f _ _ I P Vector.nil).
+    Notation index P := (@fom_syms _ _ I P vec_nil).
 
-    Local Instance uncompr_interp :
-      @interp Sigma D.
+    Instance uncompr_interp :
+      @fo_model Sigma D.
     Proof.
       split.
       - intros f v. exfalso. apply (funcs_empty f).
-      - intros P v. exact (@i_P _ _ I tt (Vector.cons (index P) (cast v (arity_const P)))).
+      - intros P v. exact (@fom_rels _ _ I tt (vec_cons (index P) (cast v (arity_const P)))).
     Defined.
 
     Lemma eval_from_compr (rho : nat -> D) (t : @term Sigma) :
@@ -283,11 +302,10 @@ Section Compression.
     Lemma sat_from_compr (rho : nat -> D) phi :
       sat rho phi <-> sat rho (encode phi).
     Proof.
-      induction phi in rho |- *; cbn; try firstorder tauto.
-      replace (cast (Vector.map (eval rho) t) (arity_const P))
-        with (Vector.map (eval rho) (cast (convert_v t) (arity_const P))); try reflexivity.
-      rewrite <- (arity_const P) in *. rewrite !cast_refl.
-      apply vec_comp. intros t'. now rewrite eval_from_compr.
+      induction phi in rho |- *; cbn; try destruct f; try firstorder tauto.
+      apply eq_iff. f_equal. f_equal.
+      rewrite <- (arity_const p). rewrite !cast_refl.
+      symmetry. apply vec_comp. intros t'. apply eval_from_compr.
     Qed.
 
   End from_compr.
@@ -310,32 +328,36 @@ End Compression.
 
 Section Constants.
 
-  Context { Sigma : Signature } {HdF : eq_dec Funcs}.
+  Context { Sigma : fo_signature } {HdF : eq_dec syms}.
 
   (* Simulation of a single constant *)
 
   Section Rpl.
 
-    Context { D : Type } { I : @interp Sigma D }.
-    Variable c : Funcs.
-    Hypothesis Hc : 0 = fun_ar c.
+    Context { D : Type } { I : @fo_model Sigma D }.
+    Variable c : syms.
+    Hypothesis Hc : 0 = ar_syms c.
 
     Fixpoint rpl_const_t n t :=
       match t with 
-      | var_term x => var_term x
-      | Func f v => if Dec (f = c) then var_term n else Func f (Vector.map (rpl_const_t n) v)
+      | in_var x => in_var x
+      | in_fot f v => if Dec (f = c) then in_var n else Func f (vec_map (rpl_const_t n) v)
       end.
 
     Definition update (rho : nat -> D) n d : nat -> D :=
       fun k => if Dec (k = n) then d else rho k.
 
     Definition i_const rho : D :=
-      eval rho (@Func _ c (match Hc with eq_refl => Vector.nil end)).
+      eval rho (Func c (match Hc with eq_refl => vec_nil end)).
+
+    Ltac simp_term := unfold eval, Func, fo_term_sem; cbn -[fo_term_recursion];
+                      try rewrite !fo_term_recursion_fix_1.
 
     Lemma i_const_inv rho rho' :
       i_const rho = i_const rho'.
     Proof.
-      cbn. erewrite vec_map_ext; try reflexivity.
+      unfold i_const. simp_term.
+      erewrite vec_map_ext; try reflexivity.
       intros t. destruct Hc. inversion 1.
     Qed.
 
@@ -345,14 +367,26 @@ Section Constants.
       cbn. f_equal. destruct Hc. now depelim v.
     Qed.
 
+    Opaque i_const.
+
+    Inductive unused_term (n : nat) : term -> Prop :=
+    | uft_var m : n <> m -> unused_term n (in_var m)
+    | uft_Func F v : (forall t, in_vec t v -> unused_term n t) -> unused_term n (Func F v).
+
+    Inductive unused (n : nat) : form -> Prop :=
+    | uf_Fal : unused n (fol_false _)
+    | uf_Pred P v : (forall t, in_vec t v -> unused_term n t) -> unused n (Pred P v)
+    | uf_bop bop phi psi : unused n phi -> unused n psi -> unused n (fol_bin bop phi psi)
+    | uf_quant quant phi : unused n phi -> unused n (fol_quant quant phi).
+
     Lemma rpl_const_eval t n rho :
       unused_term n t -> eval (update rho n (i_const rho)) (rpl_const_t n t) = eval rho t.
     Proof.
-      induction 1; cbn -[i_const].
-      - unfold update. decide _; congruence.
-      - decide _; cbn -[i_const].
-        + subst. unfold update. decide (n = n); try tauto. apply i_const_eq. 
-        + f_equal. erewrite vec_comp. apply vec_map_ext, H0. reflexivity.
+      induction 1.
+      - cbn. unfold update. decide _; congruence.
+      - simp_term. unfold update. decide _; simp_term.
+        + cbn. subst. unfold update. decide (n = n); try tauto. cbn. try apply i_const_eq. admit.
+        + simp_term. f_equal. apply vec_erewrite vec_comp. apply vec_map_ext, H0. reflexivity.
     Qed.
 
     Fixpoint rpl_const n phi :=
