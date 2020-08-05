@@ -200,3 +200,179 @@ Proof.
 Qed.
 
 
+
+Definition collatz : program :=
+    [
+        [1;2];
+        [0];
+        [0;0;0]
+    ].
+
+
+Lemma ruleRepeat M a x n:
+  stepN M (repeat [a;x] n) n (repeat (nth_default [] M a) n).
+Proof.
+    elim : n => [|n IH] /=;first constructor.
+    econstructor;
+    first by rewrite /stepR /step /collatz /nth_default /=. 
+    apply: execWord;
+    first (rewrite repeatLen /=;lia).
+    apply: IH.
+Qed.
+
+
+(* Lemma collatzAToBC n:
+stepN collatz (repeat [0] (2 * n)) n (repeat [1; 2] n).
+Proof.
+    (* elim : n => [|n IH];first constructor.
+    replace (repeat _ (2*S n)) with (0::0::repeat [0] (2*n)).
+    2: by replace (2*(S n)) with (2+2*n) by lia.
+    econstructor;
+    first by rewrite /stepR /step /collatz /nth_default /=. 
+    apply: execWord;
+    first (rewrite repeatLen /=;lia).
+    apply: IH. *)
+    replace (repeat [0] (2*n)) with (repeat [0;0] n).
+    2: {
+      elim : n => [|n /= ->] //=.
+      by replace (n+S _) with (S(n+(n+0))) by lia.
+    }
+    apply ruleRepeat.
+Qed. *)
+
+(* Lemma collatzBCToA n:
+stepN collatz (repeat [1; 2] n) n (repeat [0] n).
+Proof.
+    (* elim : n => [|n IH] /=;first constructor.
+    econstructor;
+    first by rewrite /stepR /step /collatz /nth_default /=. 
+    apply: execWord;
+    first (rewrite repeatLen /=;lia).
+    apply: IH. *)
+    apply ruleRepeat.
+Qed.
+
+Lemma collatzCBToA n:
+stepN collatz (repeat [2; 1] n) n (repeat [0;0;0] n).
+Proof.
+    (* elim : n => [|n IH] /=;first constructor.
+    econstructor;
+    first by rewrite /stepR /step /collatz /nth_default /=. 
+    apply: execWord;
+    first (rewrite repeatLen /=;lia).
+    apply: IH. *)
+Qed. *)
+
+Lemma repeatDuplicate {X} (x:list X) n:  repeat x (2*n) = repeat (x++x) n.
+Proof.
+  elim : n => [|n /= <-] //=.
+  replace (n+S _) with (S(n+(n+0))) by lia => /=.
+  by rewrite app_assoc.
+Qed.
+
+Lemma collatzEven n: rtcStep collatz (repeat [0] (2*n)) (repeat [0] n).
+Proof.
+    apply: (rt_trans _ _ _ (repeat [1;2] n)).
+    - apply (stepToRTC (m:=n)).
+      rewrite repeatDuplicate.
+      apply ruleRepeat.
+    - apply (stepToRTC (m:=n)).
+      apply ruleRepeat.
+Qed.
+
+Lemma repeatAdd {X} (xs:list X) n m: repeat xs (n+m) = repeat xs n ++ repeat xs m.
+Proof.
+  elim: n m => [|n IH] m //=.
+  by rewrite IH app_assoc.
+Qed.
+
+Lemma collatzOdd n m: n=S m -> rtcStep collatz (repeat [0] (2*n+1)) (repeat [0] (3*n+2)).
+Proof.
+  move => H.
+  apply: (rt_trans _ _ _ (0::repeat [1;2] n)).
+  2: apply: (rt_trans _ _ _ (repeat [2;1] n ++ [2])).
+  3: apply: (rt_trans _ _ _ (2::repeat [0;0;0] n)).
+  - apply (stepToRTC (m:=n)).
+    rewrite repeatAdd /=.
+    apply: execWord; first (rewrite repeatLen /=;lia).
+    rewrite repeatDuplicate.
+    apply ruleRepeat.
+  - move: H => -> /=;constructor.
+    rewrite /stepR /step /nth_default /collatz //=.
+    elim: m => [|m /= ->] //=.
+  - apply (stepToRTC (m:=n)).
+    apply: execWord; first (rewrite repeatLen /=;lia).
+    apply ruleRepeat.
+  - constructor.
+    move: H => ->.
+    replace (3*S m) with (3+3*m) by lia.
+    rewrite /stepR /step /nth_default /collatz /=;do 2 f_equal.
+    elim: m => [|m /= ->] //=.
+    by replace (m+S(m+S(m+0))) with (2+m+(m+(m+0))) by lia.
+Qed.
+
+Inductive collRel : nat -> nat -> Prop :=
+| collEven n: collRel (2*n) n
+| collOdd n: collRel (2*n+1) (3*n+2).
+
+Require Import Coq.Program.Equality.
+
+Lemma tagHaltingStepN M w:
+tag_Halting M w <-> exists n w', halting w' /\ stepN M w n w'.
+Proof.
+  split => [[n H]|[n [w' [H H']]]].
+  - exists n; eexists;split;first apply: H;clear H.
+    elim: n w => [|n IH] w /=;first constructor.
+    econstructor;first done.
+    rewrite iterInner.
+    apply: IH.
+  - exists n.
+    elim: H' H => [{}w|{}w {}w' w'' {}n H1 H2 IH] H //=.
+    move: H1 H2 (IH H) => <- _.
+    by rewrite iterInner.
+Qed.
+
+Lemma tagHaltingStepNnil M w:
+tag_Halting M w <-> exists n, stepN M w n [].
+Proof.
+  rewrite tagHaltingStepN.
+  split => [[n [? [-> H]]]|[n H]].
+  - by exists n.
+  - by exists n, [];split.
+Qed.
+
+
+(* Goal forall n m, clos_refl_trans _ collRel n m <-> rtcStep collatz (repeat [0] n) (repeat [0] m).
+Proof.
+  move => n m;split.
+  - elim => [x y H|x|x y z H1 IH1 H2 IH2].
+    + inversion H. *)
+
+
+Goal forall x, x>0 -> clos_refl_trans _ collRel x 1 <-> tag_Halting collatz (repeat [0] x).
+Proof.
+  move => x Hx.
+  rewrite tagHaltingStepNnil.
+  split => [H|[n H']].
+  - dependent induction H;
+    admit.
+    (* + have ->: (x = 2) by admit.
+      exists 3;split;first done.
+      do 4 econstructor.
+    + exists 1, [];split;first done.
+      do 2 econstructor.
+    + admit. *)
+  - 
+  (* - dependent induction H'.
+    + inversion x.
+      have Hx': (x0 = 0) by admit.
+      lia.
+    + apply IHH'.
+  - elim: n x Hx H' => [|n IH] x Hx H'.
+    + inversion H'.
+      have Hx': (x = 0) by admit.
+      lia.
+    + inversion H';subst.
+  
+  elim: H' H => [w|w w' w'' m H1 H2 IH] H /=.
+    +  *)
