@@ -342,6 +342,12 @@ Proof.
 Qed.
 
 
+Lemma unifConfl M x y z: rtcStep M x y -> rtcStep M x z -> rtcStep M y z \/ rtcStep M z y.
+Proof.
+  move: z => + H.
+  elim: H => [{}x {}y H1|{}x|{}x {}y z' H1 IH1 H2 IH2] z H.
+  -
+
 (* Goal forall n m, clos_refl_trans _ collRel n m <-> rtcStep collatz (repeat [0] n) (repeat [0] m).
 Proof.
   move => n m;split.
