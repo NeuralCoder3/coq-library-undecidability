@@ -1,0 +1,76 @@
+graph TD
+%% stateDiagram
+linkStyle default interpolate basis
+  PCP
+  TM(Turing)
+  MM
+  MM2
+  BSM
+  L
+  SR
+  ILL
+  FOL
+  FRACTRAN
+  DIOPHANTINE
+  H10C
+  CM1
+  HSC
+  LPolyNC
+%%  FMsetC
+  FMC
+  SMN
+  SemiU
+%% not in Readme
+  CFG
+  CFP(Post grammer)
+  CM2
+  MU
+
+%% Reductions
+  PCP --> CFP
+  CFP --> CFG
+  TM --> CM1
+  MM2 --> CM1
+  MM2 --> CM2
+  FRACTRAN --> H10C
+  PCP --> FOL
+  MM --> FRACTRAN
+  TM --> FRACTRAN
+  FRACTRAN --> DIOPHANTINE
+  DIOPHANTINE --> SemiU
+  PCP --> HSC
+  MM --> ILL
+  PCP --> MM
+  DIOPHANTINE --> L
+  PCP --> CFG
+  SR --> PCP
+  TM --> L
+  FRACTRAN --> MM2
+  TM --> MM
+  MM --> MM2
+  MU --> MM
+  PCP --> MM
+  TM --> PCP
+  SR --> PCP
+  H10C --> FMC
+  FMC --> LPolyNC
+  PCP --> BSM
+  BSM --> MM
+  DIOPHANTINE --> MU
+  FRACTRAN --> MM2
+  L --> TM
+  TM --> SemiU
+  PCP --> BSM
+  CM1 --> SMN
+%%  TM --> SSM
+  TM --> SMN
+  TM --> SR
+
+%%  PCP(Post correspondence problem)
+%%  TM(Turing machine halting)
+%%  MM(Minsky machine halting)
+%%  MM2(two counter Minsky machine halting)
+%%  BSM(binary stack machines)
+%%  lambda(call-by-value-lambda-calculus halting)
+%%  SR(string rewriting)
+%%  ILL(entailm)
