@@ -1,4 +1,9 @@
+Require Import Nat Arith List.
+Definition eqb_sym := Nat.eqb_sym.
+Definition eqb_neq:=Nat.eqb_neq.
+
 Require Import Undecidability.Shared.Prelim.
+
 
 Definition var := nat.
 
@@ -73,7 +78,8 @@ Inductive whileP' :=
 
 
 Require Import ssreflect ssrbool ssrfun.
-Require Import Nat Arith Lia PeanoNat.
+(* Require Import Nat Arith Lia PeanoNat. *)
+Require Import Lia.
 Require Import FunctionalExtensionality.
 Require Import Equality.
 
@@ -153,19 +159,43 @@ Proof.
       apply: H0. by constructor.
 Qed.
 
-Lemma hoareConGen P' P x c: (P'= fun s => P (update x c s)) -> {{ P' }} x := c {{ P }}.
+Lemma hoareConGen (P' P:assertion) x c: (forall s, P' s -> P (update x c s)) -> {{ P' }} x := c {{ P }}.
+Proof.
+    move => H; apply: hoareConseq.
+    2: apply hoareCon.
+    2: move => s H2;apply: H2.
+    apply: H.
+Qed.
+
+Lemma hoareAddGen (P' P:assertion) i j k: (forall s, P' s -> P (update i (s j + s k) s)) -> {{ P' }} i <- j w+ k {{ P }}.
+Proof.
+    move => H; apply: hoareConseq.
+    2: apply hoareAdd.
+    2: move => s H2;apply: H2.
+    apply: H.
+Qed.
+
+Lemma hoareSubGen (P' P:assertion) i j k: (forall s, P' s -> P (update i (s j - s k) s)) -> {{ P' }} i <- j w- k {{ P }}.
+Proof.
+    move => H; apply: hoareConseq.
+    2: apply hoareSub.
+    2: move => s H2;apply: H2.
+    apply: H.
+Qed.
+
+Lemma hoareConGen2 P' P x c: (P'= fun s => P (update x c s)) -> {{ P' }} x := c {{ P }}.
 Proof.
     move => ->.
     by apply: hoareCon.
 Qed.
 
-Lemma hoareAddGen P' P i j k: (P'= fun s => P (update i (s j + s k) s)) -> {{ P' }} i <- j w+ k {{ P }}.
+Lemma hoareAddGen2 P' P i j k: (P'= fun s => P (update i (s j + s k) s)) -> {{ P' }} i <- j w+ k {{ P }}.
 Proof.
     move => ->.
     by apply: hoareAdd.
 Qed.
 
-Lemma hoareSubGen P' P i j k: (P'= fun s => P (update i (s j - s k) s)) -> {{ P' }} i <- j w- k {{ P }}.
+Lemma hoareSubGen2 P' P i j k: (P'= fun s => P (update i (s j - s k) s)) -> {{ P' }} i <- j w- k {{ P }}.
 Proof.
     move => ->.
     by apply: hoareSub.
@@ -249,11 +279,154 @@ admit.
       }
 Admitted.
 
+Definition wMul a b c t1 t2 :=
+    c := 0;
+    t2 := 1;
+    t1 <- c w+ a;
+    while t1 do
+        t1 <- t1 w- t2;
+        c <- c w+ b
+    od.
+
+Fixpoint elementDistinct {X} (x:X) ys :=
+    match ys with
+    | nil => True
+    | y::yr => x<>y /\ elementDistinct x yr
+    end.
+
+Notation "[ x , .. , y ]" := (cons x .. (cons y nil) ..).
+
+Goal forall X (x: list X) xs, elementDistinct x xs <-> forall y, In y xs -> x<>y.
+Proof.
+  move => X x.
+  elim => [|y ys IH] //=;split.
+  - by move => [H /IH H2 y' [<- | /H2]].
+  - move => H;split.
+    + apply: H;by left.
+    + rewrite IH => y' H2;apply: H;by right.
+Qed.
+
+Fixpoint distinct {X} (xs:list X) :=
+    match xs with
+    | nil => True
+    | x::xr => elementDistinct x xr /\ distinct xr
+    end.
+
+Fixpoint elementDistinctBeq (x:nat) ys :=
+    match ys with
+    | nil => True
+    | y::yr => (x == y)=false /\ elementDistinctBeq x yr
+    end.
+
+Fixpoint distinctBeq (xs:list nat) :=
+    match xs with
+    | nil => True
+    | x::xr => elementDistinctBeq x xr /\ distinctBeq xr
+    end.
+
+Lemma distinctToBeq xs: distinct xs -> distinctBeq xs.
+Proof.
+    elim: xs => [|y yr IH] //= [H1 H2];split.
+    - move: y H2 IH H1 => x _ _.
+      elim: yr => [|y yr IH] //= [H1 /IH H2];split => //=.
+      by rewrite Nat.eqb_neq.
+    - by apply: IH.
+Qed.
+
+Ltac maxDestruct H f :=
+    revert H;
+    match goal with 
+    |- ?A /\ ?B -> _ => case;introDestruct f;introDestruct f
+    | |- _ => move => H;try rewrite H;try (move: H;rewrite f;move => H;rewrite H)
+    end
+with introDestruct f :=
+    let a := fresh "H" in
+    move => a;maxDestruct a f
+    .
+
+(* Ltac maxDestruct H :=
+    let a := fresh "H" in
+    let b := fresh "H" in
+    try (destruct H as [a b];maxDestruct a;maxDestruct b). *)
+
+(* Ltac maxDestructRewrite H :=
+    try (
+        let a := fresh "H" in
+        let b := fresh "H" in
+        destruct H as [-> ->] +
+        (destruct H as [-> b];maxDestructRewrite b) +
+        (destruct H as [a ->];maxDestructRewrite a) +
+        (destruct H as [a b];maxDestructRewrite a;maxDestructRewrite b)
+        ). *)
+        (* rewrite H
+        +
+        (let a := fresh "H" in
+        let b := fresh "H" in
+        destruct H as [a b];maxDestructRewrite a;maxDestructRewrite b)). *)
+
+Lemma gtZeroSucc n: n>0 -> exists x, n = S x.
+Proof.
+    case: n;first lia.
+    move => n _. by exists n.
+Qed.
+
+Lemma hoareMul n m a b c t1 t2: 
+    distinct [a,b,c,t1,t2] ->
+    {{ fun s => s a = n /\ s b = m }} 
+    (wMul a b c t1 t2) 
+    {{ fun s => 
+        s a = n /\ 
+        s b = m /\ 
+        s c = n*m
+     }}.
+Proof. 
+(* rewrite /distinct /elementDistinct. *)
+    move => Neq.
+      (* maxDestruct Neq. *)
+
+    rewrite /wMul.
+    apply: (hoareSeq (Q:=fun s => s a = n /\ s b = m /\ s c = 0 /\ s t1 = n /\ s t2 = 1)).
+    - apply: hoareSeq.
+      apply: hoareSeq.
+      3: apply: hoareAdd.
+      2: apply: hoareCon.
+
+      apply hoareConGen.
+      move => s [H1 H2] /=.
+      rewrite /update.
+
+      move: Neq => /distinctToBeq.
+      rewrite /distinctBeq /elementDistinctBeq => Neq.
+      repeat rewrite eqb_refl.
+      maxDestruct Neq eqb_sym.
+      repeat split;done.
+    - apply: hoareConseq.
+      2: apply: (hoareWhile 
+        (P:=fun s => 
+            s a = n /\ s b = m /\ s t2 = 1 /\
+            s c = (n - s t1) * m /\ s t1 <= n
+        )).
+        + firstorder;subst;lia.
+        + apply: hoareSeq.
+          2: apply: hoareAdd.
+          apply: hoareSubGen.
+          rewrite /update;
+          move: Neq => /distinctToBeq;
+          rewrite /distinctBeq /elementDistinctBeq => Neq;
+          repeat rewrite eqb_refl;
+          maxDestruct Neq eqb_sym.
+          firstorder;subst.
+          rewrite H18. move: H16 H19 => /gtZeroSucc [x G].
+          rewrite G Nat.sub_1_r => /=. nia.
+        + firstorder;subst.
+          by move: H3;rewrite H0 Nat.sub_0_r => ?. 
+Qed.
+
 Definition wDivMod i j k l t1 t2 :=
     k := 0;
     l := 0;
     t1 := 1;
-    wWhileLt l i t2 
+    wWhileLe l i t2 
     (
         l <- l w+ j;
         k <- k w+ t1
@@ -265,28 +438,52 @@ Definition wDivMod i j k l t1 t2 :=
     (* Search modulo. *)
 
 
-Lemma hoareDivMod n m i j k l t1 t2: 
-    {{ fun s => s i = n /\ s j = m }} 
-    (wDivMod i j k l t1 t2) 
+Lemma hoareDivMod n m a b k l t1 t2: 
+    distinct [a,b,k,l,t1,t2] ->
+    {{ fun s => s a = n /\ s b = m }} 
+    (wDivMod a b k l t1 t2) 
     {{ fun s => 
-        s i = n /\ 
-        s j = m /\ 
+        s a = n /\ 
+        s b = m /\ 
         s l = (modulo n m) /\
         s k = (div n m)
      }}.
 Proof.
+    pose (Pconst:= fun s => s a = n /\ s b = m /\ s t1 = 1).
+    move => Neq.
     rewrite /(wDivMod).
     apply: hoareSeq.
     apply: hoareSeq.
     apply: hoareSeq.
-    apply: hoareSeq.
-    apply: hoareSeq.
-    apply: hoareSeq.
-    2,3: apply: hoareCon.
-    3-5: apply: hoareSub.
-    all: simpl.
+    apply: (hoareSeq (Q:= fun s => Pconst s /\ s k = 0 /\ s l = 0)).
+    - apply: hoareSeq.
+      apply: hoareSeq.
+      2,3: apply: hoareCon.
+      apply: hoareConGen => s [H1 H2].
+      rewrite /Pconst.
+
+      rewrite /update;
+      move: Neq => /distinctToBeq;
+      rewrite /distinctBeq /elementDistinctBeq => Neq;
+      repeat rewrite eqb_refl;
+      maxDestruct Neq eqb_sym;
+      repeat split;done.
     - apply: hoareConseq.
-      2: apply: hoareCon.
+      2: apply: (hoareWhileLt
+        (P:= fun s => Pconst s /\ s l = s k * m)).
+      all: rewrite /Pconst.
+      3: move => ? H;apply: H.
+      + firstorder. rewrite H0 H1. nia.
+      + apply: hoareSeq.
+        2: apply: hoareAdd.
+        apply: hoareAddGen.
+        rewrite /update.
+        move: Neq => /distinctToBeq;
+        rewrite /distinctBeq /elementDistinctBeq => Neq;
+        repeat rewrite eqb_refl;
+        maxDestruct Neq eqb_sym.
+        firstorder. nia.
+    - 
 Admitted.
 
     (* ϕ S1 (wDivMod i j k l t1 t2) 
