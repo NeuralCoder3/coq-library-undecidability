@@ -46,37 +46,40 @@ Section TMTransform.
 
   Variable Σ : finType.
 
-  Inductive ΣB := blank | sigmaSymbol (s:Σ).
+  Definition ΣB := option Σ.
+  Definition blank : ΣB := None.
 
-  Instance eq_dec_sigB : eq_dec ΣB.
-  Proof.
-    intros. hnf. decide equality; apply eq_dec_sig.
-  Defined.
-
-  Instance finType_sigB : finTypeC (EqType ΣB).
-  Proof.
-    exists (blank::(List.map (fun s => sigmaSymbol s) (elem Σ))).
-    intros x. destruct x; cbn. 
-    induction (elem Σ); auto.
-    apply inductive_count. intros x y; now inversion 1. apply (@enum_ok Σ (class Σ) s). 
-  Defined.
+  Definition ΣB_finType : finType := (@FinType (EqType ΣB) (finTypeC_Option Σ)).
 
   Variable tm : sTM Σ.
 
   Inductive colors := 
     empty | row | 
     symbol (s:ΣB) | 
-    statePair (p:states tm) (s:ΣB) |
+    statePair (ps:states tm * ΣB) |
     state (p:states tm)
     .
 
   Instance eq_dec_colors : eq_dec colors.
   Proof.
-    intros. hnf. decide equality;try apply eq_dec_sigB.
-  Admitted.
+    intros. hnf. repeat decide equality; apply eq_dec_sig.
+  Defined.
+
+  Definition stateSymbol := prod (states tm) ΣB.
+  Definition stateSymbol_finType : finType := (@FinType (EqType stateSymbol) (finTypeC_Prod (states tm) ΣB_finType )).
 
   Instance finType_colors: finTypeC (EqType colors).
   Proof.
+  Search finTypeC.
+    pose (symbolList := let (x,_) := class ΣB_finType in x).
+    pose (stateSymbolList := let (x,_) := class stateSymbol_finType in x).
+    pose (stateList := let (x,_) := class (states tm) in x).
+    exists (empty::row::
+        (map symbol symbolList) ++
+        (map statePair stateSymbolList) ++
+        (map state stateList)
+    ).
+    intros x. destruct x; cbn. 
   Admitted.
       (* Search finTypeC. *)
       (* Print EqType. *)
@@ -87,59 +90,120 @@ Section TMTransform.
   Defined. *)
 
   Definition colors_finType : finType := (@FinType (EqType colors) finType_colors).
-  Definition ΣB_finType : finType := (@FinType (EqType ΣB) finType_sigB).
 
 
-  (* Print finType.
-  Print finTypeC.
+  Definition initTile :=
+    mkTile (statePair (start tm,blank)) empty empty row.
 
-  Check (class Σ).
-  Check tileSet. *)
-  (* Print sTM. *)
+  Definition blankTile :=
+    mkTile (symbol blank) empty row row.
 
-  Definition tiles : tileSet colors_finType :=
-      (* init tile *)
-      [mkTile (statePair (start tm) blank) empty empty row] ++ 
-      (* empty tile *)
-      [mkTile (symbol blank) empty row row] ++ 
-
-    (* move along *)
-    (let (sym,_) := (class ΣB_finType) in 
-        map (fun s => 
+  Definition passAlongTiles : tileSet colors_finType :=
+    let (sym,_) := (class ΣB_finType) in 
+        map 
+        (fun s => 
             mkTile 
                 (symbol s) 
                 (symbol s) 
                 row row) 
-            sym) ++ 
+        sym.
 
-    (* move into *)
-    (
+  Definition moveIntoTiles : tileSet colors_finType :=
+    let (sym,_) := (class ΣB_finType) in 
+    let (tmStates,_) := (class (states tm)) in 
+    concat (
+        map (fun s => 
+            concat (
+            map (fun p => 
+                [mkTile 
+                    (statePair (p,s))
+                    (symbol s)
+                    (state p)
+                    row;
+                mkTile 
+                    (statePair (p,s))
+                    (symbol s)
+                    row
+                    (state p)
+                ]
+                ) 
+            tmStates))
+        sym).
+
+  Definition transitionTile : tileSet colors_finType :=
     let (sym,_) := (class ΣB_finType) in 
     let (tmStates,_) := (class (states tm)) in 
     concat (
         map (fun s => 
             map (fun p => 
-                mkTile 
-                    (statePair p s)
-                    (symbol s)
-                    (state p)
-                    row
+                let (q,x) := (@trans Σ tm) (p,s) in
+                let (ns,d) := x in
+                match d with
+                | L => 
+                    mkTile 
+                        (symbol ns)
+                        (statePair (p,s))
+                        (state q)
+                        row
+                | R => 
+                    mkTile 
+                        (symbol ns)
+                        (statePair (p,s))
+                        row
+                        (state q)
+                | N => 
+                    mkTile 
+                        (statePair (q,ns))
+                        (statePair (p,s))
+                        row
+                        row
+                end
                 ) 
-            tmStates)
-        sym)
-        )
+            (filter (fun p => negb (halt p))
+                tmStates))
+        sym).
 
-    (* transitions *)
-
+  Definition tiles : tileSet colors_finType :=
+      [initTile;blankTile] ++
+      passAlongTiles ++
+      moveIntoTiles ++
+      transitionTile
     .
 
-    (* TODO: blank with option *)
-
-
-  (* Check tiles. *)
-
-
 End TMTransform.
+
+Require Import ssrbool ssreflect ssrfun.
+
+Print sTM.
+
+Lemma haltingEnd sig (tm:sTM sig) (p:states tm): 
+    halt p -> 
+    ~ exists t s, In t (tiles tm) /\ bottom t = statePair (p,s).
+Proof.
+    rewrite /(tiles).
+    move => Halt [t [s 
+        [
+            /(in_app_iff) [+|/(in_app_iff) [+|/(in_app_iff) [+|+]]] 
+            +
+        ]]].
+    - case => [<-|[<-|[]]] //=. 
+    - rewrite /passAlongTiles. case: (class _) => + _.
+      elim => [[]|x xs IH] /= [<-|H1] //=. 
+      by apply: IH.
+    - rewrite /moveIntoTiles. 
+      case: (class _) => + _.
+      elim => /= [+|x xs IH].
+      1: case: (class _) => //=.
+      
+
+      elim => [[]|x xs IH] /= [<-|H1] //=. 
+      by apply: IH.
+    - 
+    - 
+
+(* in every step exactly one (p,s) *)
+
+
 
 
 (* TODO: in halt => no transition *)
