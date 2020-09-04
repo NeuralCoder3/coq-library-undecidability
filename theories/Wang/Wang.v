@@ -190,16 +190,31 @@ Proof.
     - rewrite /passAlongTiles. case: (class _) => + _.
       elim => [[]|x xs IH] /= [<-|H1] //=. 
       by apply: IH.
-    - rewrite /moveIntoTiles. 
+    - rewrite /moveIntoTiles => + +. 
       case: (class _) => + _.
-      elim => /= [+|x xs IH].
-      1: case: (class _) => //=.
-      
+      case: (class _) => + _.
+      move => states symbols.
+      elim: symbols states => /= [+|x xs IH] /=.
+      1: by elim.
+      move => + /(in_app_iff) [].
+      + clear IH.
+        by elim => [+ |y ys IH] //= [<-|[<-|+]] //=.
+      + by apply: IH.
+    - rewrite /transitionTile => + +. 
+      case: (class _) => + _; case: (class _) => + _.
+      move => states symbols.
+      elim: symbols states => /= [+|x xs IH] /=.
+      1: by elim.
+      move => + /(in_app_iff) [].
+      + elim => [+|y ys {}IH] //=.
+        case (halt y) eqn: H => //=.
+        move => [<-|+].
+        * case trans => ? [] ? [] //=.
+          all: injection => _ G;move: G H Halt => -> -> //=.
+        * apply: IH.
+      + apply: IH.
+Qed.
 
-      elim => [[]|x xs IH] /= [<-|H1] //=. 
-      by apply: IH.
-    - 
-    - 
 
 (* in every step exactly one (p,s) *)
 
