@@ -39,6 +39,51 @@ Require Import Undecidability.StringRewriting.Reductions.TM_to_SRH.
 
 Require Import PslBase.FiniteTypes PslBase.FiniteTypes.BasicDefinitions PslBase.EqDec.
 
+Require Import ssrbool ssreflect ssrfun.
+Require Import Lia.
+
+Section FinTypeEnum.
+  Print undup.
+
+  Lemma countZeroNeq (X:eqType) (xs:list X) (x y:X):
+    count xs x = 0 -> y el xs ->
+    x <> y.
+  Proof.
+    elim: xs => [+|a xs IH] //=.
+    case Dec => //= H1 /IH {}IH [<-|/IH {}IH] //=.
+  Qed.
+
+  Lemma dupfreeCount (X:eqType) (xs:list X): 
+    dupfree xs -> forall x, x el xs -> count xs x = 1.
+  Proof.
+    elim:xs => [+|x xs IH] //= /dupfree_cons [/notInZero H1 H2] y [<-|H3] /=.
+    - replace (count xs x) with 0 => //=.
+      by case Dec.
+    - case Dec => ?.
+      + by exfalso;apply: (countZeroNeq H1 H3).
+      + by apply: IH.
+  Qed.
+
+  Lemma undupEl (X:eqType) (xs:list X) (x:X):
+    x el xs -> x el undup xs.
+  Proof.
+    elim: xs => [+|y ys IH] //= [->|/IH H];case: Dec => //= G;by [left|right].
+  Qed.
+
+  Lemma finDupList (X:eqType):
+    {xs & forall (x:X), In x xs} ->
+    finTypeC X.
+  Proof.
+    move => [xs H].
+    exists (undup xs).
+    move => x.
+    apply: dupfreeCount.
+    - apply: dupfree_undup.
+    - by apply: undupEl.
+  Qed.
+
+End FinTypeEnum.
+
 
 Section TMTransform.
 
@@ -68,9 +113,10 @@ Section TMTransform.
   Definition stateSymbol := prod (states tm) ΣB.
   Definition stateSymbol_finType : finType := (@FinType (EqType stateSymbol) (finTypeC_Prod (states tm) ΣB_finType )).
 
+
   Instance finType_colors: finTypeC (EqType colors).
   Proof.
-  Search finTypeC.
+    apply: finDupList.
     pose (symbolList := let (x,_) := class ΣB_finType in x).
     pose (stateSymbolList := let (x,_) := class stateSymbol_finType in x).
     pose (stateList := let (x,_) := class (states tm) in x).
@@ -79,15 +125,25 @@ Section TMTransform.
         (map statePair stateSymbolList) ++
         (map state stateList)
     ).
-    intros x. destruct x; cbn. 
-  Admitted.
-      (* Search finTypeC. *)
-      (* Print EqType. *)
-      (* Print finTypeC. *)
-    (* exists (hash::dollar::(List.map (fun s => sigma s) (elem sig))).
-    intros x. destruct x; cbn. induction (elem sig); auto. induction (elem sig); auto.  
-    apply inductive_count. intros x y; now inversion 1. apply (@enum_ok sig (class sig) s). 
-  Defined. *)
+    move => [] /=.
+    1-2: firstorder.
+    - move => [s| ];[do 3 right | firstorder ];
+      rewrite in_app_iff;left.
+      by do 2 apply: in_map.
+    - move => ps;do 3 right;
+      rewrite in_app_iff;right.
+      rewrite in_app_iff;left.
+      apply: in_map.
+      subst stateSymbolList;
+      case: class => xs /(_ ps) H.
+      apply: countIn. by rewrite H.
+    - move => ps;do 3 right;
+      do 2 (rewrite in_app_iff;right).
+      apply: in_map.
+      subst stateList;
+      case: class => xs /(_ ps) H.
+      apply: countIn; by rewrite H.
+  Defined.
 
   Definition colors_finType : finType := (@FinType (EqType colors) finType_colors).
 
@@ -171,8 +227,6 @@ Section TMTransform.
     .
 
 End TMTransform.
-
-Require Import ssrbool ssreflect ssrfun.
 
 Print sTM.
 
